@@ -1,0 +1,59 @@
+select
+    o.id  as "Order ID",
+    o.created_at::date as "Ngày tạo đơn",
+    o.delivery_at::date as "Ngày giao hàng thành công",
+    u.full_name  as "Nhân viên tạo đơn",
+    o_dim.confirmed_by_name as "Nhân viên xác nhận đơn",
+    case
+        when o.traffic_source ilike 'Streamer %'  then trim(substring(o.traffic_source from 9))
+        when o.traffic_source ilike 'Streammer %' then trim(substring(o.traffic_source from 10))
+        else null
+    end                                                                     as "Streamer",
+    mc.channel                                                              as "Kênh bán",
+    tg.group_name                                                           as "Nhóm nguồn",
+    tg.source                                                               as "Nguồn",
+    coalesce(o.traffic_source, '')                                          as "Mô tả nguồn",
+    sum(od.quantity * od.price - od.discount)                               as "Doanh thu"
+from (
+    select distinct on (id)
+        id, created_at, created_by_id, traffic_source, sale_channel, status, delivery_at
+    from raw_nhanh."order"
+    where delivery_at >= '2026-06-01'
+      and delivery_at <  '2026-07-01'
+      and status = 60
+      and business_id = 222409
+    order by id, updated_at desc
+) o
+left join (
+    select distinct on (id)
+        id, full_name
+    from raw_nhanh."user"
+    where business_id = 222409
+    order by id, etl_date desc
+) u on u.id = o.created_by_id
+left join (
+    select distinct on (order_id)
+        order_id, confirmed_by_name
+    from dim."order"
+    order by order_id, etl_date desc
+) o_dim on o_dim.order_id = o.id
+left join dim.sale_channel mc
+    on mc.id = o.sale_channel
+left join dim.traffic tg
+    on tg.description = coalesce(o.traffic_source, 'Unknown')
+    and tg.sale_channel = mc.channel
+left join raw_nhanh.order_detail od
+    on od.order_id = o.id
+    and od.is_active = 1
+group by
+    o.id,
+    o.created_at,
+    o.delivery_at,
+    u.full_name,
+    o_dim.confirmed_by_name,
+    o.traffic_source,
+    mc.channel,
+    o.sale_channel,
+    tg.group_name,
+    tg.source
+order by o.created_at, o.id;
